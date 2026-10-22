@@ -1,0 +1,67 @@
+# Dependencies
+vendor/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+storage/logs/*
+
+# Cache
+bootstrap/cache/*
+storage/framework/cache/*
+storage/framework/sessions/*
+storage/framework/views/*
+
+# Testing
+phpunit.xml
+.phpunit.result.cache
+coverage/
+
+# Build
+build/
+dist/
+
+# AI / LLM generated
+*.ai
+*.prompt
+*.md.prompt
+.claude/
+.cursor/
+.copilot/
+.windsurf/
+.kiro
+continue/
+*.llm
+*.gpt
+
+# Temp / backup files
+*~
+*.bak
+*.tmp
+*.temp
+*.orig
+
+# Database
+*.sqlite
+*.db
+*.sql.dump
+
+# Misc
+*.pid
+*.lock
+*.phar
+composer.phar

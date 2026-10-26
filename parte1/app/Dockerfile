@@ -16,13 +16,13 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 WORKDIR /app
 
-# Install PHP dependencies
-COPY composer.json composer.json
-RUN composer install --no-dev --optimize-autoloader --no-interaction
+# Install PHP dependencies (versiones fijadas por composer.lock)
+COPY composer.json composer.lock ./
+RUN composer install --no-interaction --no-scripts
 
 # Copy application source
 COPY . .
 
 # Expose port and start PHP built-in server bound to all interfaces
 EXPOSE 8000
-CMD ["php", "-S", "0.0.0.0:8000", "-t", "web"]
+CMD ["php", "-S", "0.0.0.0:8000", "-t", "web", "web/index.php"]

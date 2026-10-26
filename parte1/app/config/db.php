@@ -2,11 +2,6 @@
 
 declare(strict_types=1);
 
-/**
- * Database configuration for SQL Server via pdo_sqlsrv.
- * Credentials are read from environment variables with fallbacks
- * for the Docker Compose environment defined in compose.yaml.
- */
 return [
     'class'    => 'yii\db\Connection',
     'dsn'      => sprintf(

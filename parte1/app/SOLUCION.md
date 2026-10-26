@@ -1,6 +1,6 @@
-# SOLUCION.md — Prueba Técnica PHP
+# Solución: prueba técnica PHP
 
-**Autor:** Ismael Moreno  
+**Autor:** Isaac Moreno Moreno  
 **Fecha:** 2026-10-22
 
 ---
@@ -8,13 +8,12 @@
 ## Índice
 
 1. [Cómo ejecutar (Parte 1)](#1-cómo-ejecutar-parte-1)
-2. [Ejemplos de uso — curl](#2-ejemplos-de-uso--curl)
-3. [Decisiones técnicas — Parte 1](#3-decisiones-técnicas--parte-1)
+2. [Ejemplos de uso con curl](#2-ejemplos-de-uso-con-curl)
+3. [Decisiones técnicas](#3-decisiones-técnicas)
 4. [Soluciones a problemas concretos](#4-soluciones-a-problemas-concretos)
-5. [Decisiones técnicas — Parte 2](#5-decisiones-técnicas--parte-2)
-6. [Uso de IA durante el desarrollo](#6-uso-de-ia-durante-el-desarrollo)
-7. [Estructura de ficheros](#7-estructura-de-ficheros)
-8. [Deuda técnica y próximos pasos](#8-deuda-técnica-y-próximos-pasos)
+5. [Parte 2](#5-parte-2)
+6. [Estructura de ficheros](#6-estructura-de-ficheros)
+7. [Deuda técnica y próximos pasos](#7-deuda-técnica-y-próximos-pasos)
 
 ---
 
@@ -37,15 +36,14 @@ docker compose logs -f app
 ### Ejecutar los tests unitarios
 
 ```bash
-docker compose exec app composer install  # primera vez
 docker compose exec app ./vendor/bin/phpunit
 ```
 
 ---
 
-## 2. Ejemplos de uso — curl
+## 2. Ejemplos de uso con curl
 
-### 201 — Lectura nueva aceptada
+### 201: Lectura nueva aceptada
 
 ```bash
 curl -s -X POST http://localhost:8000/api/lecturas \
@@ -58,17 +56,32 @@ curl -s -X POST http://localhost:8000/api/lecturas \
   }' | jq
 ```
 
-### 200 — Reintento (idempotencia)
+### 200: Reintento (idempotencia)
 
 ```bash
 # Ejecutar el mismo curl anterior dos veces: la segunda responde 200 + "duplicado": true
 ```
 
-### 422 — CUPS con dos contratos: resolución por vigencia
+### 201: CUPS con dos contratos: resolución por vigencia
 
 ```bash
 # ES0904688281126584QG tiene contrato 12 (baja 2026-07-15) y contrato 24 (activo desde 2026-07-16).
-# Una lectura del 2026-08-01 debe resolverse al contrato 24, no al 12.
+# Una lectura del 2026-08-15 se asigna al contrato 24, no al 12 → 201 con "contrato_id": 24.
+curl -s -X POST http://localhost:8000/api/lecturas \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "cups":          "ES0904688281126584QG",
+    "fecha_lectura": "2026-08-15",
+    "lectura_kwh":   25700,
+    "tipo":          "real"
+  }' | jq
+```
+
+### 409: Misma fecha y tipo con otro valor (lectura conflictiva)
+
+```bash
+# Ya existe una lectura real del contrato 24 el 2026-08-01 con 25613 kWh.
+# Enviar otro valor para esa misma fecha y tipo no es un reintento: no se guarda.
 curl -s -X POST http://localhost:8000/api/lecturas \
   -H 'Content-Type: application/json' \
   -d '{
@@ -77,9 +90,10 @@ curl -s -X POST http://localhost:8000/api/lecturas \
     "lectura_kwh":   25900,
     "tipo":          "real"
   }' | jq
+# → 409 {"error":"LECTURA_CONFLICTIVA","mensaje":"...","lectura_existente_id":164,"lectura_kwh_existente":25613}
 ```
 
-### 422 — CUPS dado de baja en la fecha
+### 422: CUPS dado de baja en la fecha
 
 ```bash
 curl -s -X POST http://localhost:8000/api/lecturas \
@@ -93,7 +107,7 @@ curl -s -X POST http://localhost:8000/api/lecturas \
 # → {"error":"CONTRATO_BAJA","mensaje":"..."}
 ```
 
-### 422 — Fecha futura
+### 422: Fecha futura
 
 ```bash
 curl -s -X POST http://localhost:8000/api/lecturas \
@@ -106,7 +120,7 @@ curl -s -X POST http://localhost:8000/api/lecturas \
   }' | jq
 ```
 
-### 400 — Validación de formato
+### 400: Validación de formato
 
 ```bash
 curl -s -X POST http://localhost:8000/api/lecturas \
@@ -121,33 +135,27 @@ curl -s -X POST http://localhost:8000/api/lecturas \
 
 ---
 
-## 3. Decisiones técnicas — Parte 1
+## 3. Decisiones técnicas
 
-### 3.1 Por qué Arquitectura Hexagonal y no MVC clásico de Yii2
+### 3.1 Estructura del código
 
-El enunciado especifica Yii2 como framework pero no impone una estructura interna concreta. La decisión fue usar Yii2 **exclusivamente como adaptador HTTP** (routing, parsing del body, respuesta JSON) y construir el núcleo con Arquitectura Hexagonal + DDD.
+La lógica de negocio está separada del framework para poder testearla sin base de datos:
 
-**Alternativa descartada:** un controlador Yii2 clásico con ActiveRecord habría sido más rápido de escribir. El problema es que mezcla en una sola clase la validación HTTP, las reglas de negocio y las consultas SQL. Resultado: imposible testear sin base de datos, imposible cambiar el framework sin reescribir la lógica.
+| Pieza | Qué hace |
+|-------|----------|
+| `LecturaController` (Yii2) | Recibe la petición, valida el formato y traduce cada error a su código HTTP |
+| `RegistrarLecturaHandler` | Reglas de negocio: contrato vigente en la fecha, baja, fecha futura, reintento o conflicto |
+| `SqlServerContratoRepository`, `SqlServerLecturaRepository` | Consultas SQL con PDO |
 
-**Beneficio concreto obtenido:** `RegistrarLecturaHandler` (el caso de uso) no importa ninguna clase de Yii2, PDO ni SQL Server. Los 7 tests unitarios del handler se ejecutan en menos de un segundo sin Docker, sin red y sin base de datos. Esto permite validar toda la lógica de negocio en CI/CD sin infraestructura.
+El handler no depende de Yii ni de SQL Server, solo de las dos interfaces de repositorio. Por eso los 9 tests cubren todas las reglas con repositorios simulados, en milisegundos y sin Docker.
 
-**Coste asumido:** más ficheros (17 vs ~4 en MVC clásico) y la curva de aprendizaje del patrón. Se considera un coste justificado para una base de código que crecerá.
+**Coste asumido:** para un único endpoint es más estructura de la necesaria (interfaces, DTO de entrada y salida, objetos de valor). En una versión real lo simplificaría a controlador, servicio y repositorio, y usaría `Model::rules()` de Yii para la validación de formato, que ahora está repetida entre el controlador y los objetos de valor. No lo he cambiado en la entrega para no tocar código ya probado.
 
 ---
 
-### 3.2 Por qué Value Objects para Cups, LecturaKwh y TipoLectura
+### 3.2 Tipos para CUPS, kWh y tipo de lectura
 
-**Problema evitado: Primitive Obsession.** Sin VOs, el código pasa `string $cups` de función en función. Cada función que recibe ese string podría recibir `"INVALIDO"`, `""` o `null` y nadie garantiza que la validación se haya ejecutado antes.
-
-Con `Cups::fromString("ES0904998698797309NB")` la invariante se ejecuta **en el momento de construcción**. Si el objeto existe, es válido. No hay que repetir la validación en el handler, en el repositorio ni en los tests.
-
-```php
-// Sin VO: la validación puede estar en cualquier sitio (o en ninguno)
-function guardarLectura(string $cups, int $kwh): void { ... }
-
-// Con VO: si el objeto existe, el dato es válido
-function guardarLectura(Cups $cups, LecturaKwh $kwh): void { ... }
-```
+`Cups`, `LecturaKwh` y `TipoLectura` validan su formato al construirse: si el objeto existe, el dato es válido, y el handler y los repositorios no tienen que volver a comprobarlo.
 
 ---
 
@@ -160,9 +168,11 @@ Los datos de muestra contienen el CUPS `ES0904688281126584QG` con dos contratos:
 
 Si se filtrara por `estado = 'activo'`, una lectura con `fecha_lectura = "2026-06-01"` se asignaría erróneamente al contrato 24 o no encontraría contrato. La lectura correcta corresponde al contrato 12, que estaba vigente en esa fecha aunque ahora esté de baja.
 
-La consulta SQL busca el contrato donde `fecha_alta <= fecha_lectura` y (`fecha_baja IS NULL` o `fecha_baja >= fecha_lectura`). El estado `baja` solo se usa para determinar el código de error en la respuesta, no para filtrar.
+El repositorio devuelve todos los contratos del CUPS y el handler (`Contrato::estaVigenteEn`) elige el que cubre la fecha: `fecha_alta <= fecha_lectura` y (`fecha_baja IS NULL` o `fecha_baja >= fecha_lectura`). Así la lectura se imputa al titular correcto.
 
-**Consecuencia:** la API acepta lecturas históricas legítimas de contratos ya finalizados, lo cual es correcto en el dominio eléctrico (una distribuidora puede enviar lecturas con retraso).
+**Consecuencia:** si el contrato que cubre la fecha está hoy de baja, la lectura se rechaza con `CONTRATO_BAJA`, aplicando literalmente el requisito ("los contratos dados de baja no aceptan lecturas").
+
+**Decisión pendiente de negocio:** la lectura de cierre. En los datos, el contrato 5 tiene una lectura del 2026-08-31 (su fecha de baja) recibida el 2026-09-01, y el contrato 12 una del 2026-07-15 recibida el 2026-07-16: la distribuidora envía la lectura de baja *después* de la baja. Con la regla actual se rechazaría. Si negocio quiere aceptarla, el cambio es una línea en el handler (aceptar si `fecha_lectura <= fecha_baja`).
 
 ---
 
@@ -173,9 +183,21 @@ Dos opciones comunes para idempotencia en APIs REST:
 1. **Header `Idempotency-Key`:** el cliente genera un UUID por petición y lo envía en una cabecera. El servidor guarda el resultado asociado a esa clave.
 2. **Clave natural del dominio:** el servidor detecta el duplicado comparando los datos de negocio.
 
-Se eligió la opción 2 porque la clave natural `(contrato_id, fecha_lectura, lectura_kwh, tipo)` identifica una lectura de forma unívoca en el dominio eléctrico. La distribuidora no necesita gestionar UUIDs. El comportamiento es predecible y auditables sin tablas adicionales.
+Se eligió la opción 2: la distribuidora no necesita gestionar UUIDs y el comportamiento es predecible y auditable sin tablas adicionales.
 
-**Caso borde manejado:** si llega la misma fecha y CUPS pero con distinto `lectura_kwh` o `tipo`, se inserta como nueva lectura. Se interpreta como una corrección legítima (p.ej. la distribuidora envía una estimada y luego la real).
+**Clave:** `(contrato_id, fecha_lectura, tipo)`. Un contador solo puede marcar un valor real (o uno estimado) en una fecha:
+
+| Llega… | Resultado |
+|--------|-----------|
+| Misma clave, mismo `lectura_kwh` | Reintento → `200` con la lectura existente y `"duplicado": true` |
+| Misma clave, distinto `lectura_kwh` | Dato contradictorio → `409 LECTURA_CONFLICTIVA`, no se guarda |
+| Misma fecha, distinto `tipo` (estimada → real) | Regularización legítima → `201` |
+
+Antes la clave incluía `lectura_kwh`, de modo que dos lecturas reales distintas para el mismo día se guardaban ambas y el consumo quedaba incoherente.
+
+**Concurrencia:** comprobar y luego insertar tiene una carrera si llegan dos reintentos a la vez (justo el caso tras un timeout). La comprobación y la inserción van en una transacción y la `SELECT` usa `WITH (UPDLOCK, HOLDLOCK)`, el patrón estándar de SQL Server: el segundo reintento espera al primero y después ve la fila ya insertada.
+
+No se añadió un índice `UNIQUE` sobre la clave porque los datos existentes ya contienen un duplicado (contrato 3, 2026-06-01, ids 121 y 137, recibidos el 2 y el 3 de junio). Crear el índice exigiría antes decidir qué hacer con esa fila; queda como siguiente paso.
 
 ---
 
@@ -204,116 +226,34 @@ Los tests del handler usan implementaciones mock de `ContratoRepository` y `Lect
 
 ### 4.1 CUPS con múltiples contratos históricos
 
-**Problema:** el esquema permite que un CUPS tenga varios contratos (cambios de titular). Una query `WHERE cups = ? AND estado = 'activo'` devolvería el contrato actual pero fallaría para lecturas históricas de contratos anteriores.
+**Problema:** un CUPS puede tener varios contratos (cambio de titular). Filtrar por `estado = 'activo'` imputaría lecturas históricas al titular equivocado.
 
-**Solución:** la query del repositorio devuelve todos los contratos del CUPS ordenados por `fecha_alta DESC` y selecciona el que cubre la `fecha_lectura`. Si hay solapamiento de vigencias en los datos (error de datos), se usa el de mayor id como criterio de desempate.
-
-```sql
-SELECT TOP 1 *
-FROM   contratos
-WHERE  cups = :cups
-  AND  fecha_alta <= :fecha
-  AND  (fecha_baja IS NULL OR fecha_baja >= :fecha)
-ORDER  BY fecha_alta DESC, id DESC
-```
+**Solución:** `SqlServerContratoRepository::findByCups()` devuelve todos los contratos del CUPS (una sola consulta, `ORDER BY fecha_alta ASC`) y el handler elige el que cubre la `fecha_lectura` con `Contrato::estaVigenteEn()`. Con los datos actuales no hay vigencias solapadas; si las hubiera, se tomaría el primero por `fecha_alta`.
 
 ### 4.2 Distinción entre CUPS_NO_ENCONTRADO, CONTRATO_BAJA y FECHA_FUERA_VIGENCIA
 
-Tres errores distintos con la misma causa aparente ("no se encontró contrato válido"). La distinción es importante para que la distribuidora sepa exactamente qué corregir:
+Para que la distribuidora sepa qué corregir, cada causa de rechazo tiene su código (todas `422`, la lectura no se guarda):
 
 | Situación | Error devuelto |
 |-----------|---------------|
 | No existe ningún contrato con ese CUPS | `CUPS_NO_ENCONTRADO` |
-| Existe contrato pero estaba de baja en esa fecha | `CONTRATO_BAJA` |
-| Existe contrato pero la fecha no cae dentro de su vigencia (`fecha_alta`/`fecha_baja`) | `FECHA_FUERA_VIGENCIA` |
+| El contrato que cubre la fecha está hoy de baja | `CONTRATO_BAJA` |
+| Ningún contrato del CUPS cubre la fecha (anterior al alta o posterior a la baja) | `FECHA_FUERA_VIGENCIA` |
+| Fecha posterior a hoy | `FECHA_FUTURA` |
 
-El repositorio hace dos consultas: primero verifica si el CUPS existe en absoluto, luego busca la vigencia en la fecha concreta. Esto permite devolver el error más específico.
+### 4.3 Inyección de dependencias
 
-### 4.3 Inyección de dependencias en Yii2 sin contenedor externo
-
-Yii2 tiene su propio DI container (`Yii::$container`). Para no introducir una librería de DI adicional (p.ej. PHP-DI) y mantener las dependencias del proyecto al mínimo, se registran los bindings en `config/web.php`:
-
-```php
-'container' => [
-    'definitions' => [
-        \App\Domain\Contrato\ContratoRepository::class =>
-            \App\Infrastructure\Persistence\SqlServerContratoRepository::class,
-        \App\Domain\Lectura\LecturaRepository::class =>
-            \App\Infrastructure\Persistence\SqlServerLecturaRepository::class,
-    ],
-],
-```
-
-El controlador recibe el handler por constructor injection; Yii2 lo resuelve automáticamente.
+No se usa el contenedor de Yii2: `config/web.php` construye el PDO, los dos repositorios y el handler, y registra el handler como componente (`Yii::$app->lecturaHandler`). Son tres líneas de wiring explícito, suficiente para un único caso de uso; el controlador no conoce las implementaciones concretas.
 
 ---
 
-## 5. Decisiones técnicas — Parte 2
+## 5. Parte 2
 
-### 5.1 Por qué la hipótesis principal es H1 (reintento sin limpiar estado)
-
-El log de Jenkins muestra timeout a los 45 minutos. Un proceso que timeout sin transacción completa deja filas en estado intermedio. La combinación de síntomas —facturas duplicadas Y facturas con importes anómalos para el mismo periodo— es coherente con dos ejecuciones parciales del SP, no con un simple error de datos.
-
-**H2 (SP sin guarda de idempotencia)** sería la causa estructural que convierte H1 en un problema: si el SP tuviera la guarda, el reintento sería inofensivo.
-
-### 5.2 Por qué la corrección no usa DELETE
-
-Los scripts de corrección cambian `estado = 'anulada'` en lugar de hacer `DELETE`. Motivos:
-
-1. **Auditoría:** las facturas anuladas quedan como evidencia del error para auditorías regulatorias (sector eléctrico regulado).
-2. **Reversibilidad:** si la corrección es incorrecta, se puede deshacer cambiando el estado de vuelta.
-3. **Integridad referencial:** otras tablas pueden tener FKs apuntando a esas facturas (p.ej. `reclamaciones`).
-
-### 5.3 Por qué el constraint UNIQUE se aplica después de la corrección
-
-`ALTER TABLE facturas ADD CONSTRAINT uq_facturas_contrato_periodo UNIQUE (contrato_id, periodo)` fallaría si hay duplicados activos en la tabla. El orden correcto es: anular duplicados (T8) → aplicar constraint (T9). El constraint actúa como red de seguridad para impedir que el problema se repita, no como corrección.
-
-### 5.4 Por qué se recomienda hacer el SP set-based
-
-El timeout de 45 minutos (vs ~1 min en agosto) sugiere que el SP procesa fila a fila con un cursor. Con set-based SQL, la facturación de miles de contratos se convierte en una sola operación de inserción masiva en lugar de N inserciones individuales con N bloqueos de fila. La mejora de rendimiento esperada es de uno a dos órdenes de magnitud.
+El diagnóstico, la corrección y el informe a negocio están en [`parte2/SOLUCION.md`](../../parte2/SOLUCION.md).
 
 ---
 
-## 6. Uso de IA durante el desarrollo
-
-### 6.1 Qué se usó
-
-Se utilizó un asistente de IA (Kiro) durante todo el proceso de desarrollo como herramienta de apoyo.
-
-### 6.2 Cómo se usó y para qué
-
-**Diseño arquitectónico:**  
-Se usó la IA para validar la estructura hexagonal propuesta antes de escribir código: confirmar que los puertos (`ContratoRepository`, `LecturaRepository`) estaban bien definidos y que la dirección de dependencias era correcta (infraestructura → aplicación → dominio, nunca al revés).
-
-**Generación de código repetitivo:**  
-Los Value Objects (`Cups`, `LecturaKwh`, `TipoLectura`) siguen un patrón idéntico (constructor privado, factory estática, validación, getter). Se generaron los tres con la IA a partir de un ejemplo y se revisaron manualmente antes de incorporarlos.
-
-**Casos de error en el controlador:**  
-El mapeo de excepciones de dominio a códigos HTTP (try/catch con múltiples bloques) se generó con ayuda de la IA y se revisó para asegurar que no había excepciones sin capturar.
-
-**Tests unitarios:**  
-El esqueleto de los tests PHPUnit (setup de mocks, estructura de los casos) se generó con la IA. Cada caso de test fue revisado para confirmar que el mock respondía correctamente y que el assertion era significativo.
-
-**SQL de diagnóstico (Parte 2):**  
-Las queries de `02_facturas_duplicadas.sql` y `03_facturas_importe_anomalo.sql` se generaron con ayuda de la IA y se revisaron para adaptarlas al esquema real de la BD.
-
-**Documentación:**  
-El SDD, el TASKS.md y este SOLUCION.md se redactaron con asistencia de IA, partiendo de las decisiones técnicas tomadas previamente y estructurándolas de forma coherente.
-
-### 6.3 Qué no se delegó en la IA
-
-- **Análisis del esquema de BD:** leer `init.sql` (19.000 líneas en parte1, 313.000 en parte2) y extraer las tablas relevantes fue un paso manual de comprensión del dominio.
-- **Detección del caso `ES0904688281126584QG`:** identificar que un CUPS podía tener dos contratos históricos y que eso rompía la lógica `WHERE estado = 'activo'` fue una decisión de diseño propia, no generada por la IA.
-- **Hipótesis de la incidencia de facturación:** el razonamiento sobre por qué el timeout + reintento es más probable que un error de datos fue un análisis propio, basado en el log de Jenkins y el patrón de síntomas.
-- **Revisión de todo el código generado:** cada fichero generado fue leído y entendido antes de considerarlo parte de la solución.
-
-### 6.4 Criterio general de uso
-
-La IA se usó como acelerador para código estructural y repetitivo, y como segundo par de ojos para confirmar decisiones de diseño. Las decisiones de negocio (qué validar, qué error devolver, cómo modelar el dominio) fueron siempre propias. Todo el código generado fue revisado; nada se incorporó sin entenderlo.
-
----
-
-## 7. Estructura de ficheros
+## 6. Estructura de ficheros
 
 ```
 parte1/app/
@@ -322,18 +262,19 @@ parte1/app/
 │   │   ├── Contrato/
 │   │   │   ├── Cups.php                          ← VO: validación ES + longitud
 │   │   │   ├── Contrato.php                      ← Entity: lógica de vigencia
-│   │   │   ├── ContratoRepository.php            ← Puerto (interface)
+│   │   │   ├── ContratoRepository.php            ← Interfaz de repositorio
 │   │   │   └── Exception/
 │   │   │       ├── CupsNoEncontradoException.php
 │   │   │       ├── ContratoBajaException.php
 │   │   │       └── FechaFueraVigenciaException.php
 │   │   └── Lectura/
-│   │       ├── Lectura.php                       ← Aggregate Root
+│   │       ├── Lectura.php                       ← Entidad lectura
 │   │       ├── LecturaKwh.php                    ← VO: entero ≥ 0
 │   │       ├── TipoLectura.php                   ← VO: real|estimada
-│   │       ├── LecturaRepository.php             ← Puerto (interface)
+│   │       ├── LecturaRepository.php             ← Interfaz de repositorio
 │   │       └── Exception/
-│   │           └── FechaFuturaException.php
+│   │           ├── FechaFuturaException.php
+│   │           └── LecturaConflictivaException.php
 │   ├── Application/
 │   │   └── RegistrarLectura/
 │   │       ├── RegistrarLecturaCommand.php       ← DTO entrada
@@ -341,10 +282,10 @@ parte1/app/
 │   │       └── LecturaRegistradaResponse.php     ← DTO salida
 │   └── Infrastructure/
 │       ├── Persistence/
-│       │   ├── SqlServerContratoRepository.php   ← Adaptador BD (PDO)
-│       │   └── SqlServerLecturaRepository.php    ← Adaptador BD (PDO)
+│       │   ├── SqlServerContratoRepository.php   ← SQL Server (PDO)
+│       │   └── SqlServerLecturaRepository.php    ← SQL Server (PDO)
 │       └── Http/
-│           └── LecturaController.php             ← Adaptador HTTP (Yii2)
+│           └── LecturaController.php             ← Controlador Yii2
 ├── config/
 │   ├── web.php                                   ← Wiring DI + URL rules
 │   └── db.php                                    ← Conexión SQL Server
@@ -359,7 +300,7 @@ parte1/app/
 
 ---
 
-## 8. Deuda técnica y próximos pasos
+## 7. Deuda técnica y próximos pasos
 
 | # | Ítem | Prioridad |
 |---|------|-----------|
@@ -368,5 +309,6 @@ parte1/app/
 | 3 | Paginación o batch endpoint para envíos masivos | Media |
 | 4 | Logging estructurado (p.ej. Monolog) para trazabilidad de peticiones | Media |
 | 5 | Validación de coherencia del acumulado kWh (opcional, configurable) | Baja |
-| 6 | Hacer el SP de facturación set-based para evitar timeouts | Alta (Parte 2) |
+| 6 | Índice `UNIQUE (contrato_id, fecha_lectura, tipo)` en `lecturas`, tras depurar el duplicado histórico del contrato 3 | Media |
 | 7 | Añadir test de integración E2E con Docker Compose en CI | Media |
+| 8 | Simplificar la estructura (controlador, servicio y repositorio) y validar con `Model::rules()` de Yii | Baja |

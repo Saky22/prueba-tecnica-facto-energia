@@ -10,10 +10,6 @@ use App\Domain\Contrato\Cups;
 use DateTimeImmutable;
 use PDO;
 
-/**
- * SQL Server adapter for ContratoRepository.
- * Translates between the domain model and the existing DB schema.
- */
 final class SqlServerContratoRepository implements ContratoRepository
 {
     public function __construct(private readonly PDO $pdo) {}

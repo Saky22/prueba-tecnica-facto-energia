@@ -7,8 +7,7 @@ namespace App\Domain\Lectura;
 use InvalidArgumentException;
 
 /**
- * Value Object for the accumulated counter reading in kWh.
- * Invariant: must be a non-negative integer.
+ * Valor acumulado del contador en kWh (entero no negativo).
  */
 final class LecturaKwh
 {

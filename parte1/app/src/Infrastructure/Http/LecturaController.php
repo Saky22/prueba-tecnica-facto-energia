@@ -10,30 +10,21 @@ use App\Domain\Contrato\Exception\ContratoBajaException;
 use App\Domain\Contrato\Exception\CupsNoEncontradoException;
 use App\Domain\Contrato\Exception\FechaFueraVigenciaException;
 use App\Domain\Lectura\Exception\FechaFuturaException;
+use App\Domain\Lectura\Exception\LecturaConflictivaException;
 use InvalidArgumentException;
 use Throwable;
 use Yii;
 use yii\web\Controller;
 use yii\web\Response;
 
-/**
- * HTTP adapter (input port) for the RegistrarLectura use case.
- *
- * Responsibilities:
- *  - Parse and validate the HTTP request body format.
- *  - Translate domain exceptions to HTTP responses.
- *  - Delegate all business logic to RegistrarLecturaHandler.
- */
 class LecturaController extends Controller
 {
-    /** Disable Yii's CSRF validation: REST API, not form-based. */
     public $enableCsrfValidation = false;
 
     public function actionCreate(): Response
     {
         Yii::$app->response->format = Response::FORMAT_JSON;
 
-        // Parse JSON body
         $raw = Yii::$app->request->getRawBody();
         $data = json_decode($raw, true);
 
@@ -45,7 +36,6 @@ class LecturaController extends Controller
             ]);
         }
 
-        // Validate required fields and types before delegating to use case
         $errors = $this->validateRequest($data);
         if (!empty($errors)) {
             Yii::$app->response->statusCode = 400;
@@ -86,8 +76,16 @@ class LecturaController extends Controller
             Yii::$app->response->statusCode = 422;
             return $this->asJson(['error' => 'FECHA_FUTURA', 'mensaje' => $e->getMessage()]);
 
+        } catch (LecturaConflictivaException $e) {
+            Yii::$app->response->statusCode = 409;
+            return $this->asJson([
+                'error'                => 'LECTURA_CONFLICTIVA',
+                'mensaje'              => $e->getMessage(),
+                'lectura_existente_id' => $e->lecturaExistenteId,
+                'lectura_kwh_existente'=> $e->kwhExistente,
+            ]);
+
         } catch (InvalidArgumentException $e) {
-            // Value Object construction failures (should not reach here after validateRequest, but belt-and-suspenders)
             Yii::$app->response->statusCode = 400;
             return $this->asJson(['error' => 'VALIDACION', 'campos' => ['general' => $e->getMessage()]]);
 
@@ -99,14 +97,12 @@ class LecturaController extends Controller
     }
 
     /**
-     * Validates presence, types and basic format of the request fields.
-     * Returns an array of field => message errors, empty if valid.
+     * @return array<string, string> campo => mensaje; vacío si es válido
      */
     private function validateRequest(array $data): array
     {
         $errors = [];
 
-        // cups
         if (empty($data['cups'])) {
             $errors['cups'] = 'El campo cups es obligatorio.';
         } elseif (!is_string($data['cups'])) {
@@ -115,7 +111,6 @@ class LecturaController extends Controller
             $errors['cups'] = 'El CUPS no tiene un formato válido (debe comenzar por ES y tener entre 20 y 22 caracteres).';
         }
 
-        // fecha_lectura
         if (empty($data['fecha_lectura'])) {
             $errors['fecha_lectura'] = 'El campo fecha_lectura es obligatorio.';
         } elseif (!is_string($data['fecha_lectura'])) {
@@ -124,7 +119,6 @@ class LecturaController extends Controller
             $errors['fecha_lectura'] = 'El campo fecha_lectura debe tener el formato YYYY-MM-DD.';
         }
 
-        // lectura_kwh
         if (!isset($data['lectura_kwh'])) {
             $errors['lectura_kwh'] = 'El campo lectura_kwh es obligatorio.';
         } elseif (!is_int($data['lectura_kwh']) && !ctype_digit((string) $data['lectura_kwh'])) {
@@ -133,7 +127,6 @@ class LecturaController extends Controller
             $errors['lectura_kwh'] = 'Debe ser un entero no negativo.';
         }
 
-        // tipo
         if (empty($data['tipo'])) {
             $errors['tipo'] = 'El campo tipo es obligatorio.';
         } elseif (!in_array($data['tipo'], ['real', 'estimada'], true)) {

@@ -4,9 +4,6 @@ declare(strict_types=1);
 
 namespace App\Application\RegistrarLectura;
 
-/**
- * Output DTO returned by RegistrarLecturaHandler.
- */
 final class LecturaRegistradaResponse
 {
     public function __construct(

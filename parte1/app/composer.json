@@ -1,10 +1,11 @@
 {
     "name": "prueba-tecnica/parte1",
-    "description": "API de recepción de lecturas — Arquitectura Hexagonal + DDD",
+    "description": "API de recepción de lecturas",
     "type": "project",
     "require": {
         "php": "^8.3",
-        "yiisoft/yii2": "^2.0"
+        "yiisoft/yii2": "^2.0",
+        "yiisoft/yii2-composer": "^2.0"
     },
     "require-dev": {
         "phpunit/phpunit": "^10.5"
@@ -21,9 +22,19 @@
     },
     "config": {
         "allow-plugins": {
-            "yiisoft/yii2-composer": true
+            "yiisoft/yii2-composer": true,
+            "fxp/composer-asset-plugin": true
+        },
+        "fxp-asset": {
+            "enabled": true
         }
     },
+    "repositories": [
+        {
+            "type": "composer",
+            "url": "https://asset-packagist.org"
+        }
+    ],
     "minimum-stability": "stable",
     "prefer-stable": true
 }

@@ -7,8 +7,7 @@ namespace App\Domain\Contrato;
 use InvalidArgumentException;
 
 /**
- * Value Object that represents a CUPS (Código Universal de Punto de Suministro).
- * Invariant: must start with "ES" and be 20–22 characters long.
+ * CUPS: empieza por ES y tiene entre 20 y 22 caracteres.
  */
 final class Cups
 {

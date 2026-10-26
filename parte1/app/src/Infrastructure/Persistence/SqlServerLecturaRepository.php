@@ -11,10 +11,8 @@ use App\Domain\Lectura\TipoLectura;
 use DateTimeImmutable;
 use PDO;
 use RuntimeException;
+use Throwable;
 
-/**
- * SQL Server adapter for LecturaRepository.
- */
 final class SqlServerLecturaRepository implements LecturaRepository
 {
     public function __construct(private readonly PDO $pdo) {}
@@ -41,7 +39,6 @@ final class SqlServerLecturaRepository implements LecturaRepository
             throw new RuntimeException('No se pudo obtener el id de la lectura insertada.');
         }
 
-        // Return a new Lectura with the generated id
         return new Lectura(
             id: (int) $row['id'],
             contratoId: $lectura->contratoId(),
@@ -52,35 +49,45 @@ final class SqlServerLecturaRepository implements LecturaRepository
         );
     }
 
-    public function findDuplicado(
-        int $contratoId,
-        DateTimeImmutable $fechaLectura,
-        LecturaKwh $lecturaKwh,
-        TipoLectura $tipo
-    ): ?Lectura {
+    public function findByClave(int $contratoId, DateTimeImmutable $fechaLectura, TipoLectura $tipo): ?Lectura
+    {
+        // UPDLOCK + HOLDLOCK: bloquea la clave hasta el commit (evita la carrera entre reintentos).
+        // TOP 1: los datos históricos ya traen un duplicado (contrato 3, 2026-06-01).
         $stmt = $this->pdo->prepare(
-            'SELECT id, contrato_id, fecha_lectura, lectura_kwh, tipo, fecha_recepcion
-               FROM dbo.lecturas
+            'SELECT TOP 1 id, contrato_id, fecha_lectura, lectura_kwh, tipo, fecha_recepcion
+               FROM dbo.lecturas WITH (UPDLOCK, HOLDLOCK)
               WHERE contrato_id   = :contrato_id
                 AND fecha_lectura = :fecha_lectura
-                AND lectura_kwh   = :lectura_kwh
-                AND tipo          = :tipo'
+                AND tipo          = :tipo
+              ORDER BY id'
         );
 
         $stmt->execute([
             ':contrato_id'   => $contratoId,
             ':fecha_lectura' => $fechaLectura->format('Y-m-d'),
-            ':lectura_kwh'   => $lecturaKwh->value(),
             ':tipo'          => $tipo->value(),
         ]);
 
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        if ($row === false) {
-            return null;
-        }
+        return $row === false ? null : $this->hydrate($row);
+    }
 
-        return $this->hydrate($row);
+    public function transaccional(callable $operacion): mixed
+    {
+        $this->pdo->beginTransaction();
+
+        try {
+            $resultado = $operacion();
+            $this->pdo->commit();
+
+            return $resultado;
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
     }
 
     private function hydrate(array $row): Lectura

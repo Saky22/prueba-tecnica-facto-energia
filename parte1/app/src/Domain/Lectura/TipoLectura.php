@@ -6,10 +6,6 @@ namespace App\Domain\Lectura;
 
 use InvalidArgumentException;
 
-/**
- * Value Object for the reading type.
- * Invariant: must be either 'real' or 'estimada'.
- */
 final class TipoLectura
 {
     private const ALLOWED = ['real', 'estimada'];

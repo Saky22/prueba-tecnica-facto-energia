@@ -13,6 +13,7 @@ use App\Domain\Contrato\Exception\ContratoBajaException;
 use App\Domain\Contrato\Exception\CupsNoEncontradoException;
 use App\Domain\Contrato\Exception\FechaFueraVigenciaException;
 use App\Domain\Lectura\Exception\FechaFuturaException;
+use App\Domain\Lectura\Exception\LecturaConflictivaException;
 use App\Domain\Lectura\Lectura;
 use App\Domain\Lectura\LecturaKwh;
 use App\Domain\Lectura\LecturaRepository;
@@ -32,6 +33,8 @@ final class RegistrarLecturaHandlerTest extends TestCase
         $this->contratoRepo = $this->createMock(ContratoRepository::class);
         $this->lecturaRepo  = $this->createMock(LecturaRepository::class);
         $this->handler      = new RegistrarLecturaHandler($this->contratoRepo, $this->lecturaRepo);
+
+        $this->lecturaRepo->method('transaccional')->willReturnCallback(fn(callable $op) => $op());
     }
 
     public function test_happy_path_creates_lectura_and_returns_201_data(): void
@@ -42,7 +45,7 @@ final class RegistrarLecturaHandlerTest extends TestCase
         $contrato = $this->makeContrato(1, $cups, 'activo', '2024-02-01', null);
         $this->contratoRepo->method('findByCups')->willReturn([$contrato]);
 
-        $this->lecturaRepo->method('findDuplicado')->willReturn(null);
+        $this->lecturaRepo->method('findByClave')->willReturn(null);
         $this->lecturaRepo->method('save')->willReturnCallback(
             fn(Lectura $l) => $this->makeLectura(42, $l)
         );
@@ -63,13 +66,49 @@ final class RegistrarLecturaHandlerTest extends TestCase
         $this->contratoRepo->method('findByCups')->willReturn([$contrato]);
 
         $existing = $this->makePersistedLectura(42, 1, '2026-01-15', 10849, 'real');
-        $this->lecturaRepo->method('findDuplicado')->willReturn($existing);
+        $this->lecturaRepo->method('findByClave')->willReturn($existing);
         $this->lecturaRepo->expects($this->never())->method('save');
 
         $response = $this->handler->handle($command);
 
         $this->assertSame(42, $response->id);
         $this->assertTrue($response->duplicado);
+    }
+
+    public function test_same_key_with_different_kwh_is_conflict_and_not_saved(): void
+    {
+        $cups    = 'ES0904998698797309NB';
+        $command = new RegistrarLecturaCommand($cups, '2026-01-15', 10900, 'real');
+
+        $this->contratoRepo->method('findByCups')->willReturn([
+            $this->makeContrato(1, $cups, 'activo', '2024-02-01', null),
+        ]);
+        $this->lecturaRepo->method('findByClave')->willReturn(
+            $this->makePersistedLectura(42, 1, '2026-01-15', 10849, 'real')
+        );
+        $this->lecturaRepo->expects($this->never())->method('save');
+        $this->expectException(LecturaConflictivaException::class);
+
+        $this->handler->handle($command);
+    }
+
+    public function test_real_reading_after_estimated_same_date_is_saved(): void
+    {
+        $cups = 'ES0904998698797309NB';
+        $this->contratoRepo->method('findByCups')->willReturn([
+            $this->makeContrato(1, $cups, 'activo', '2024-02-01', null),
+        ]);
+        $this->lecturaRepo->expects($this->once())->method('findByClave')
+            ->with(1, $this->anything(), $this->callback(fn(TipoLectura $t) => $t->value() === 'real'))
+            ->willReturn(null);
+        $this->lecturaRepo->expects($this->once())->method('save')->willReturnCallback(
+            fn(Lectura $l) => $this->makeLectura(43, $l)
+        );
+
+        $response = $this->handler->handle(new RegistrarLecturaCommand($cups, '2026-01-15', 10900, 'real'));
+
+        $this->assertSame(43, $response->id);
+        $this->assertFalse($response->duplicado);
     }
 
     public function test_cups_not_found_throws_exception(): void
@@ -88,7 +127,6 @@ final class RegistrarLecturaHandlerTest extends TestCase
         $this->contratoRepo->method('findByCups')->willReturn([$contrato]);
         $this->expectException(ContratoBajaException::class);
 
-        // Reading date within the baja contract's vigency period
         $this->handler->handle(new RegistrarLecturaCommand($cups, '2026-06-01', 11324, 'real'));
     }
 
@@ -100,7 +138,6 @@ final class RegistrarLecturaHandlerTest extends TestCase
         $this->contratoRepo->method('findByCups')->willReturn([$contrato]);
         $this->expectException(FechaFueraVigenciaException::class);
 
-        // Reading date before fecha_alta
         $this->handler->handle(new RegistrarLecturaCommand($cups, '2023-01-01', 100, 'real'));
     }
 
@@ -117,24 +154,21 @@ final class RegistrarLecturaHandlerTest extends TestCase
 
     public function test_cups_with_two_contracts_resolves_correct_one(): void
     {
-        // CUPS ES0904688281126584QG: contract 12 baja 2026-07-15, contract 24 active from 2026-07-16
+        // Contrato 12 de baja el 2026-07-15, contrato 24 activo desde el 2026-07-16
         $cups     = 'ES0904688281126584QG';
         $oldBaja  = $this->makeContrato(12, $cups, 'baja', '2023-01-01', '2026-07-15');
         $newActivo = $this->makeContrato(24, $cups, 'activo', '2026-07-16', null);
 
         $this->contratoRepo->method('findByCups')->willReturn([$oldBaja, $newActivo]);
-        $this->lecturaRepo->method('findDuplicado')->willReturn(null);
+        $this->lecturaRepo->method('findByClave')->willReturn(null);
         $this->lecturaRepo->method('save')->willReturnCallback(
             fn(Lectura $l) => $this->makeLectura(99, $l)
         );
 
         $response = $this->handler->handle(new RegistrarLecturaCommand($cups, '2026-08-01', 25613, 'real'));
 
-        // Must resolve to contract 24, not 12
         $this->assertSame(24, $response->contratoId);
     }
-
-    // --- Helpers -------------------------------------------------------
 
     private function makeContrato(int $id, string $cups, string $estado, string $alta, ?string $baja): Contrato
     {

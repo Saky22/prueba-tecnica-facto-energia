@@ -3,20 +3,9 @@
 declare(strict_types=1);
 
 use App\Application\RegistrarLectura\RegistrarLecturaHandler;
-use App\Domain\Contrato\ContratoRepository;
-use App\Domain\Lectura\LecturaRepository;
 use App\Infrastructure\Persistence\SqlServerContratoRepository;
 use App\Infrastructure\Persistence\SqlServerLecturaRepository;
 
-/**
- * Yii2 application configuration.
- *
- * DI wiring: the container binds domain ports (interfaces) to their
- * SQL Server infrastructure adapters. The handler is registered as a
- * component so the controller can resolve it via Yii::$app->lecturaHandler.
- */
-
-// Build PDO from db config (shared across repositories)
 $dbConfig = require __DIR__ . '/db.php';
 
 $pdo = new PDO(
@@ -34,6 +23,7 @@ return [
     'id'         => 'prueba-tecnica-parte1',
     'basePath'   => dirname(__DIR__),
     'bootstrap'  => ['log'],
+    'controllerNamespace' => 'App\\Infrastructure\\Http',
 
     'aliases' => [
         '@app' => dirname(__DIR__),
@@ -68,7 +58,6 @@ return [
                 ['class' => 'yii\web\UrlRule', 'pattern' => 'api/lecturas', 'route' => 'lectura/create', 'verb' => 'POST'],
             ],
         ],
-        // Application-level service: the use case handler
         'lecturaHandler' => $handler,
     ],
 ];

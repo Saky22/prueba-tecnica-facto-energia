@@ -6,25 +6,20 @@ namespace App\Domain\Lectura;
 
 use DateTimeImmutable;
 
-/**
- * Port (output) — persistence abstraction for Lectura.
- */
 interface LecturaRepository
 {
-    /**
-     * Persists a new reading and returns it with its generated id.
-     */
     public function save(Lectura $lectura): Lectura;
 
     /**
-     * Finds an existing reading by its natural idempotency key:
-     * (contrato_id, fecha_lectura, lectura_kwh, tipo).
-     * Returns null when no match is found.
+     * Busca por (contrato_id, fecha_lectura, tipo). Dentro de transaccional() la clave
+     * queda bloqueada hasta el commit.
      */
-    public function findDuplicado(
-        int $contratoId,
-        DateTimeImmutable $fechaLectura,
-        LecturaKwh $lecturaKwh,
-        TipoLectura $tipo
-    ): ?Lectura;
+    public function findByClave(int $contratoId, DateTimeImmutable $fechaLectura, TipoLectura $tipo): ?Lectura;
+
+    /**
+     * @template T
+     * @param callable(): T $operacion
+     * @return T
+     */
+    public function transaccional(callable $operacion): mixed;
 }

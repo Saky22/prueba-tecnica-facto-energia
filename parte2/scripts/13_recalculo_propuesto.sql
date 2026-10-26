@@ -30,8 +30,8 @@ consumo AS (
 ),
 precio AS (
     SELECT tp.tarifa_id,
-           ROUND(SUM(tp.precio_kwh       * d.dias) / @dias, 6) AS precio_kwh,
-           ROUND(SUM(tp.termino_fijo_mes * d.dias) / @dias, 2) AS fijo
+           ROUND(SUM(CAST(tp.precio_kwh AS DECIMAL(19,10)) * d.dias) / @dias, 6) AS precio_kwh,
+           ROUND(SUM(CAST(tp.termino_fijo_mes AS DECIMAL(19,10)) * d.dias) / @dias, 2) AS fijo
     FROM   dbo.tarifas_precios tp
     CROSS APPLY (SELECT DATEDIFF(DAY, GREATEST(tp.vigente_desde, @inicio),
                                       LEAST(ISNULL(tp.vigente_hasta, @fin), @fin)) + 1 AS dias) d

@@ -102,7 +102,7 @@ El contrato 97 (reclamación 7) tuvo lecturas **estimadas** en junio, julio y ag
 
 - **Facturas duplicadas (`10`):** se anula una factura por contrato (61). Se conserva la **pagada** si la hay; en los contratos 59 y 60 la pagada es la de id mayor, así que conservar "la primera" anularía un cobro. No se borra nada: es auditable y reversible. Las anuladas con `fecha_pago` son los **46 cobros duplicados, 2.956,19 €**, que hay que devolver.
 - **Lecturas repetidas (`11`):** se mueven, no se borran, las 44 copias a `dbo.lecturas_descartadas`, con el motivo y la forma de revertirlo en el propio script.
-- **Importes (`13`):** **no se modifican las facturas.** Ya están emitidas y en su mayoría cobradas, así que corregirlas exige facturas rectificativas o abonos, que es decisión de negocio. El script da, por contrato, el importe facturado, el correcto, la diferencia y la causa: **74 facturas con importe incorrecto y 1.971,13 € cobrados de más**, de los que 1.912,04 € corresponden a la recarga de SUR.
+- **Importes (`13`):** **no se modifican las facturas.** Ya están emitidas y en su mayoría cobradas, así que corregirlas exige facturas rectificativas o abonos, que es decisión de negocio. El script da, por contrato, el importe facturado, el correcto, la diferencia y la causa: **74 facturas con importe incorrecto y 1.971,13 € facturados de más**: 1.912,03 € por la recarga de SUR y 59,10 € por el precio sin prorratear.
 
 ---
 
@@ -158,7 +158,7 @@ stage('Comprobación') {
 **A quién afecta.** 97 contratos (94 clientes):
 
 - 61 tienen factura duplicada; a **46 se les ha cobrado dos veces** (2.956,19 € en total).
-- 74 tienen un importe incorrecto, con **1.971,13 € cobrados de más** en total. Casi todo es por la recarga de SUR; lo del precio son 1–2 € por cliente.
+- 74 tienen un importe incorrecto, con **1.971,13 € facturados de más** en total. Casi todo es por la recarga de SUR; lo del precio son 1–2 € por cliente.
 - De las 7 reclamaciones, 6 corresponden a estos fallos. La del cliente 97 no: su factura es correcta. Tras tres meses de lecturas estimadas bajas, la lectura real recoge el consumo pendiente.
 
 **Qué proponemos hacer:**

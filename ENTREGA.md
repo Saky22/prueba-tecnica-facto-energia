@@ -11,6 +11,8 @@ Este fichero es el punto de entrada. Cada parte tiene un único documento con to
 
 Los `README.md` son los enunciados originales, sin modificar.
 
+El proceso de trabajo está en `docs/`: el diseño previo con requisitos y trazabilidad ([`docs/SDD.md`](docs/SDD.md)) y su desglose en tareas atómicas con su estado ([`docs/TASKS.md`](docs/TASKS.md)).
+
 ---
 
 ## 1. Requisitos
@@ -20,7 +22,7 @@ Los `README.md` son los enunciados originales, sin modificar.
 - Puertos libres: `8000` (API), `14331` (BD parte 1) y `14332` (BD parte 2).
 - `curl`. No hace falta PHP ni Composer en local.
 
-Si la imagen de PHP ya estaba descargada, actualízala para tener la versión con el parche de seguridad de octubre de 2026 (PHP 8.3.36 o superior): `docker pull php:8.3-cli-bookworm`.
+El `Dockerfile` fija PHP 8.3.36, la versión con el parche de seguridad de octubre de 2026 (CVE-2026-109618 y CVE-2026-109619).
 
 ---
 
@@ -67,7 +69,30 @@ En total, 97 contratos (94 clientes) y 1.971,13 € facturados de más. De las 7
 
 ---
 
-## 4. Problemas frecuentes
+## 4. Puntos clave
+
+Lo que no pedía el enunciado de forma explícita y he resuelto:
+
+**Parte 1**
+
+- **Reintentos simultáneos.** No basta con comprobar antes de insertar: dos reintentos que llegan a la vez pasarían los dos la comprobación. La comprobación y la inserción van en una transacción con bloqueo, y `smoke.sh` lo demuestra con 5 envíos simultáneos que dejan una sola fila.
+- **Lectura contradictoria.** Misma fecha y tipo con otro valor no es un reintento: se rechaza con 409 en lugar de guardar dos lecturas reales distintas del mismo día.
+- **Cambio de titular.** La lectura se imputa al contrato vigente en su fecha, no al activo hoy (caso real en los datos: CUPS con los contratos 12 y 24).
+- **Datos existentes.** Los datos ya traen una lectura duplicada (contrato 3); por eso la idempotencia se garantiza con bloqueo y no con un índice único que no se podría crear.
+
+**Parte 2**
+
+- **Tres causas, no una.** Además del relanzamiento sin control, el fichero de SUR se cargó dos veces y el SP no prorratea un cambio de precio a mitad de mes. Cada causa está cuantificada por separado.
+- **Una reclamación que no es un error.** El contrato 97 es una regularización tras tres meses de lecturas estimadas: la factura es correcta y hay que explicarla, no corregirla.
+- **Corrección segura con el dinero.** Al anular duplicados se conserva siempre la factura cobrada (en los contratos 59 y 60, conservar "la primera" habría anulado un cobro) y se identifican los 46 cobros a devolver. No se borra nada.
+- **Lo técnico separado de lo que decide negocio.** Las facturas emitidas no se reescriben: el script `13` deja calculado el importe correcto de cada una para que negocio decida cómo rectificar.
+- **Prevención en dos niveles y verificable.** El proceso (SP con transacción, guarda y prorrateo) y la base de datos (índices únicos). `run.sh` relanza la facturación y comprueba que no cambia nada.
+
+**Ambas partes:** reproducibles con un comando sobre una base de datos recién creada, y con PHP fijado a la versión con el parche de seguridad de octubre de 2026.
+
+---
+
+## 5. Problemas frecuentes
 
 | Síntoma | Solución |
 |---------|----------|

@@ -77,8 +77,8 @@ BEGIN
               AND fecha_hasta BETWEEN @inicio AND @fin;
 
             -- (3) Precio y término fijo ponderados por los días de vigencia de cada precio en el periodo
-            SELECT @precio      = ROUND(SUM(tp.precio_kwh       * d.dias) / @dias_periodo, 6),
-                   @fijo        = ROUND(SUM(tp.termino_fijo_mes * d.dias) / @dias_periodo, 2),
+            SELECT @precio      = ROUND(SUM(CAST(tp.precio_kwh AS DECIMAL(19,10)) * d.dias) / @dias_periodo, 6),
+                   @fijo        = ROUND(SUM(CAST(tp.termino_fijo_mes AS DECIMAL(19,10)) * d.dias) / @dias_periodo, 2),
                    @dias_precio = SUM(d.dias)
             FROM dbo.tarifas_precios tp
             CROSS APPLY (SELECT DATEDIFF(DAY,

@@ -49,7 +49,7 @@ Leyenda: `[x]` hecho · `[ ]` pendiente
 - [x] **T5.6** CUPS con dos contratos → se asigna al vigente en la fecha (24, no 12)
 - [x] **T5.7** Ejecutar la suite: 9 tests en verde
 
-### T6 · Verificación end-to-end (curl contra el entorno levantado)
+### T6 · Verificación end-to-end (`parte1/smoke.sh` contra el entorno levantado)
 
 - [ ] **T6.1** `201`: lectura nueva
 - [ ] **T6.2** `200`: reenvío exacto → `"duplicado": true`
@@ -101,7 +101,7 @@ Leyenda: `[x]` hecho · `[ ]` pendiente
 
 - [x] **T11.1** `parte2/SOLUCION.md`: diagnóstico, alcance, corrección, prevención e informe para negocio con las decisiones pendientes
 
-### T12 · Verificación
+### T12 · Verificación (`parte2/run.sh`)
 
 - [ ] **T12.1** Ejecutar `10`, `11`, `12`, `13` y `20` sobre una base de datos recién creada con `docker compose up` y comprobar las cifras (61 / 44 / 74)
 - [ ] **T12.2** Relanzar `sp_facturar_periodo '2026-09'` tras la corrección → 0 facturas nuevas y log `OK` con los omitidos

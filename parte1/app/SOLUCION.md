@@ -39,6 +39,14 @@ docker compose logs -f app
 docker compose exec app ./vendor/bin/phpunit
 ```
 
+### Pruebas de humo contra la API levantada
+
+```bash
+./smoke.sh
+```
+
+Lanza todos los casos de la sección 2 (201, 200, 409, 422, 400) y 5 envíos simultáneos de la misma lectura, comprobando en la base de datos que solo queda una fila. Indica OK o FALLO por caso y termina con código distinto de 0 si algo falla. Se puede repetir: las altas aceptan 201 la primera vez y 200 después.
+
 ---
 
 ## 2. Ejemplos de uso con curl

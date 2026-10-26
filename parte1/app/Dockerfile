@@ -1,5 +1,4 @@
-FROM php:8.3-cli-bookworm
-
+FROM php:8.3.36-cli-bookworm
 # Drivers de SQL Server para PHP (ODBC Driver 18 + sqlsrv / pdo_sqlsrv) y Composer.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl gnupg git unzip libicu-dev unixodbc-dev \

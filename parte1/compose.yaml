@@ -53,6 +53,8 @@ services:
       DB_DATABASE: lecturas
       DB_USER: sa
       DB_PASSWORD: Prueba.Tecnica.2026
+      # Varios procesos en el servidor integrado: permite probar reintentos simultáneos (smoke.sh)
+      PHP_CLI_SERVER_WORKERS: 4
     # El bind mount ./app:/app oculta el vendor/ de la imagen: se instala al arrancar
     # (no-op si ya existe) para que funcione con un clon limpio.
     command: sh -c "composer install --no-interaction && php -S 0.0.0.0:8000 -t web web/index.php"

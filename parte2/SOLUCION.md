@@ -1,7 +1,8 @@
 # Parte 2: Incidencia en la facturación de septiembre 2026
 
 **Autor:** Isaac Moreno Moreno
-**Fecha:** 2026-10-22
+
+Requisitos y arranque rápido en [`ENTREGA.md`](../ENTREGA.md).
 
 ---
 
@@ -20,32 +21,43 @@ En total hay **97 contratos (94 clientes)** con alguna incidencia. Las cifras sa
 
 ---
 
-## 2. Cómo ejecutar
+## 2. Ejecutar
 
-Conexión según `README.md`, siempre con `sqlcmd -I` (los índices filtrados necesitan `QUOTED_IDENTIFIER ON`). Orden:
+```bash
+cd parte2
+docker compose up -d
+./run.sh --diagnostico   # diagnósticos 01-08 y después corrección y prevención
+./run.sh                 # solo corrección y prevención
+```
 
 | Script | Tipo | Qué hace |
 |--------|------|----------|
 | `01`–`08` | Diagnóstico (solo lectura) | Evidencias de cada causa |
-| `10_correccion_anular_duplicados.sql` | Corrección | Anula la factura sobrante de los 61 contratos (61 filas) |
+| `10_correccion_anular_duplicados.sql` | Corrección | Anula la factura sobrante de los 61 contratos, conservando la pagada |
 | `11_correccion_lecturas_duplicadas.sql` | Corrección | Mueve las 44 lecturas repetidas a `lecturas_descartadas` |
 | `12_sp_idempotencia.sql` | Prevención | Nueva versión de `sp_facturar_periodo` |
 | `13_recalculo_propuesto.sql` | Propuesta (solo lectura) | Importe correcto por contrato y causa de cada reclamación |
-| `20_prevencion.sql` | Prevención | Índices únicos + comprobación post-facturación para Jenkins |
+| `20_prevencion.sql` | Prevención | Índices únicos y comprobación post-facturación |
 
-Desde `parte2/`:
-
-```bash
-for f in scripts/1*.sql scripts/20_prevencion.sql; do
-  docker compose exec -T db /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'Prueba.Tecnica.2026' -C -I -b -d facturacion < "$f"
-done
-```
-
-Todos los scripts de corrección y prevención son idempotentes: ejecutarlos dos veces no cambia nada.
+`run.sh` los ejecuta en orden con `sqlcmd -I -b` y termina relanzando la facturación de septiembre para comprobar que no crea facturas ni deja duplicados. Todos los scripts de corrección y prevención son idempotentes. Para ejecutar uno suelto, usar siempre `sqlcmd -I` (los índices filtrados necesitan `QUOTED_IDENTIFIER ON`).
 
 ---
 
 ## 3. Diagnóstico
+
+### Cómo lo investigué
+
+Partí de los dos síntomas (facturas duplicadas e importes altos) y del timeout del log de Jenkins, y contrasté cada hipótesis con los datos:
+
+| Hipótesis | Resultado | Evidencia |
+|-----------|-----------|-----------|
+| La ejecución se cortó y se relanzó sin limpiar | Confirmada | Ejecución 30 en `EN_CURSO` y ejecución 31 manual (scripts `01`, `02`) |
+| El SP no comprueba si ya existe factura | Confirmada | Definición del SP (`07`) |
+| Hay lecturas duplicadas en septiembre | Confirmada | Recarga del fichero de SUR (`04`, `08`) |
+| Hay un precio erróneo en septiembre | Confirmada en otra forma | El precio es correcto, pero el SP no prorratea el cambio (`05`) |
+| El cursor del SP explica el timeout | Descartada | El mismo SP tarda unos 90 s todos los meses y en el relanzamiento |
+| Todas las subidas de importe son error | Descartada | Contrato 97: regularización tras lecturas estimadas (`13`) |
+
 
 ### A. Facturas duplicadas: ejecución cortada + SP no idempotente
 
@@ -107,6 +119,24 @@ El contrato 97 (reclamación 7) tuvo lecturas **estimadas** en junio, julio y ag
 | Comprobación post-facturación en Jenkins (debe devolver 0 filas) | `20` | Detectar el problema antes de la emisión del día siguiente |
 
 Sin cambios de arquitectura: el SP mantiene el cursor y su lógica. Reescribirlo de forma set-based podría hacerlo más rápido, pero no es necesario para resolver esta incidencia.
+
+**Paso propuesto para el job de Jenkins** (no hay un Jenkins de pruebas en el entorno: `run.sh` reproduce la misma comprobación en local):
+
+```groovy
+stage('Facturación') {
+    steps { sh "php yii facturacion/mensual --periodo=${PERIODO}" }   // con el SP nuevo, relanzar es seguro
+}
+stage('Comprobación') {
+    steps {
+        // misma consulta que el bloque 3 de 20_prevencion.sql; debe devolver 0
+        sh '''
+          n=$(sqlcmd ... -h -1 -W -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM (<comprobación>) x" | tr -d '[:space:]')
+          test "$n" = "0" || { echo "Facturación $PERIODO con incidencias: no se emite"; exit 1; }
+        '''
+    }
+}
+// La emisión (EMISION_FACTURAS) solo se lanza si esta etapa pasa.
+```
 
 **Limitaciones conocidas:**
 
